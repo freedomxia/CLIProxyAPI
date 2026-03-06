@@ -41,6 +41,9 @@ type Config struct {
 	// AuthDir is the directory where authentication token files are stored.
 	AuthDir string `yaml:"auth-dir" json:"-"`
 
+	// PluginConnectionToken authorizes external token updater integrations on /api/plugin/*.
+	PluginConnectionToken string `yaml:"plugin-connection-token" json:"plugin-connection-token"`
+
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
 

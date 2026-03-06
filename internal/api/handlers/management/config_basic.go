@@ -326,3 +326,15 @@ func (h *Handler) DeleteProxyURL(c *gin.Context) {
 	h.cfg.ProxyURL = ""
 	h.persist(c)
 }
+
+// Plugin connection token
+func (h *Handler) GetPluginConnectionToken(c *gin.Context) {
+	c.JSON(200, gin.H{"plugin-connection-token": h.cfg.PluginConnectionToken})
+}
+func (h *Handler) PutPluginConnectionToken(c *gin.Context) {
+	h.updateStringField(c, func(v string) { h.cfg.PluginConnectionToken = v })
+}
+func (h *Handler) DeletePluginConnectionToken(c *gin.Context) {
+	h.cfg.PluginConnectionToken = ""
+	h.persist(c)
+}

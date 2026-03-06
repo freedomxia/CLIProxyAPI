@@ -360,6 +360,15 @@ func (s *Server) setupRoutes() {
 	})
 	s.engine.POST("/v1internal:method", geminiCLIHandlers.CLIHandler)
 
+	if s.mgmt != nil {
+		plugin := s.engine.Group("/api/plugin")
+		{
+			plugin.GET("/status", s.mgmt.GetPluginStatus)
+			plugin.POST("/update-token", s.mgmt.UpdatePluginToken)
+			plugin.POST("/check-tokens", s.mgmt.CheckPluginTokens)
+		}
+	}
+
 	// OAuth callback endpoints (reuse main server port)
 	// These endpoints receive provider redirects and persist
 	// the short-lived code/state for the waiting goroutine.
@@ -518,6 +527,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/proxy-url", s.mgmt.PutProxyURL)
 		mgmt.PATCH("/proxy-url", s.mgmt.PutProxyURL)
 		mgmt.DELETE("/proxy-url", s.mgmt.DeleteProxyURL)
+		mgmt.GET("/plugin-connection-token", s.mgmt.GetPluginConnectionToken)
+		mgmt.PUT("/plugin-connection-token", s.mgmt.PutPluginConnectionToken)
+		mgmt.PATCH("/plugin-connection-token", s.mgmt.PutPluginConnectionToken)
+		mgmt.DELETE("/plugin-connection-token", s.mgmt.DeletePluginConnectionToken)
 
 		mgmt.POST("/api-call", s.mgmt.APICall)
 
