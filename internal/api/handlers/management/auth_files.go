@@ -1306,12 +1306,12 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 			projects, errAll := onboardAllGeminiProjects(ctx, gemClient, &ts)
 			if errAll != nil {
 				log.Errorf("Failed to complete Gemini CLI onboarding: %v", errAll)
-				SetOAuthSessionError(state, fmt.Sprintf("Failed to complete Gemini CLI onboarding: %v", errAll))
+				SetOAuthSessionError(state, formatGeminiOnboardingStatusError(errAll))
 				return
 			}
 			if errVerify := ensureGeminiProjectsEnabled(ctx, gemClient, projects); errVerify != nil {
 				log.Errorf("Failed to verify Cloud AI API status: %v", errVerify)
-				SetOAuthSessionError(state, fmt.Sprintf("Failed to verify Cloud AI API status: %v", errVerify))
+				SetOAuthSessionError(state, formatGeminiCloudAPIStatusError(errVerify))
 				return
 			}
 			ts.ProjectID = strings.Join(projects, ",")
@@ -1320,7 +1320,7 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 			ts.Auto = false
 			if errSetup := performGeminiCLISetup(ctx, gemClient, &ts, ""); errSetup != nil {
 				log.Errorf("Google One auto-discovery failed: %v", errSetup)
-				SetOAuthSessionError(state, fmt.Sprintf("Google One auto-discovery failed: %v", errSetup))
+				SetOAuthSessionError(state, formatGeminiOnboardingStatusError(errSetup))
 				return
 			}
 			if strings.TrimSpace(ts.ProjectID) == "" {
@@ -1331,19 +1331,24 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 			isChecked, errCheck := checkCloudAPIIsEnabled(ctx, gemClient, ts.ProjectID)
 			if errCheck != nil {
 				log.Errorf("Failed to verify Cloud AI API status: %v", errCheck)
-				SetOAuthSessionError(state, fmt.Sprintf("Failed to verify Cloud AI API status: %v", errCheck))
+				SetOAuthSessionError(state, formatGeminiCloudAPIStatusError(errCheck))
 				return
 			}
 			ts.Checked = isChecked
 			if !isChecked {
 				log.Error("Cloud AI API is not enabled for the auto-discovered project")
-				SetOAuthSessionError(state, fmt.Sprintf("Cloud AI API not enabled for project %s", ts.ProjectID))
+				SetOAuthSessionError(state, formatGeminiCloudAPINotEnabled(ts.ProjectID))
 				return
 			}
 		} else {
 			if errEnsure := ensureGeminiProjectAndOnboard(ctx, gemClient, &ts, requestedProjectID); errEnsure != nil {
+				if _, ok := errors.AsType[*projectSelectionRequiredError](errEnsure); ok {
+					log.Errorf("Gemini CLI requires manual project selection: %v", errEnsure)
+					SetOAuthSessionError(state, formatGeminiOnboardingStatusError(errEnsure))
+					return
+				}
 				log.Errorf("Failed to complete Gemini CLI onboarding: %v", errEnsure)
-				SetOAuthSessionError(state, fmt.Sprintf("Failed to complete Gemini CLI onboarding: %v", errEnsure))
+				SetOAuthSessionError(state, formatGeminiOnboardingStatusError(errEnsure))
 				return
 			}
 
@@ -1356,13 +1361,13 @@ func (h *Handler) RequestGeminiCLIToken(c *gin.Context) {
 			isChecked, errCheck := checkCloudAPIIsEnabled(ctx, gemClient, ts.ProjectID)
 			if errCheck != nil {
 				log.Errorf("Failed to verify Cloud AI API status: %v", errCheck)
-				SetOAuthSessionError(state, fmt.Sprintf("Failed to verify Cloud AI API status: %v", errCheck))
+				SetOAuthSessionError(state, formatGeminiCloudAPIStatusError(errCheck))
 				return
 			}
 			ts.Checked = isChecked
 			if !isChecked {
 				log.Error("Cloud AI API is not enabled for the selected project")
-				SetOAuthSessionError(state, fmt.Sprintf("Cloud AI API not enabled for project %s", ts.ProjectID))
+				SetOAuthSessionError(state, formatGeminiCloudAPINotEnabled(ts.ProjectID))
 				return
 			}
 		}
@@ -2050,10 +2055,74 @@ func (h *Handler) RequestIFlowCookieToken(c *gin.Context) {
 	})
 }
 
-type projectSelectionRequiredError struct{}
+type projectSelectionRequiredError struct {
+	Message string
+}
 
 func (e *projectSelectionRequiredError) Error() string {
-	return "gemini cli: project selection required"
+	if e == nil {
+		return "Project selection required"
+	}
+	if msg := strings.TrimSpace(e.Message); msg != "" {
+		return msg
+	}
+	return "Project selection required"
+}
+
+func newProjectSelectionRequiredError(message string) *projectSelectionRequiredError {
+	return &projectSelectionRequiredError{Message: strings.TrimSpace(message)}
+}
+
+func formatGeminiOnboardingStatusError(err error) string {
+	if err == nil {
+		return "Failed to complete Gemini CLI onboarding"
+	}
+
+	var selectionErr *projectSelectionRequiredError
+	if errors.As(err, &selectionErr) {
+		return selectionErr.Error()
+	}
+
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return "Failed to complete Gemini CLI onboarding"
+	}
+
+	switch {
+	case strings.Contains(msg, "no Google Cloud projects available for this account"):
+		return "No Google Cloud projects available for this account; please specify project_id manually"
+	case strings.HasPrefix(msg, "fetch project list:"):
+		return fmt.Sprintf("Failed to fetch Google Cloud project list: %s", strings.TrimSpace(strings.TrimPrefix(msg, "fetch project list:")))
+	case strings.HasPrefix(msg, "load code assist:"):
+		return fmt.Sprintf("loadCodeAssist failed: %s", strings.TrimSpace(strings.TrimPrefix(msg, "load code assist:")))
+	case strings.HasPrefix(msg, "auto-discovery onboardUser:"):
+		return fmt.Sprintf("Auto-discovery onboarding failed: %s", strings.TrimSpace(strings.TrimPrefix(msg, "auto-discovery onboardUser:")))
+	case strings.HasPrefix(msg, "onboard user:"):
+		return fmt.Sprintf("onboardUser failed: %s", strings.TrimSpace(strings.TrimPrefix(msg, "onboard user:")))
+	case strings.Contains(msg, "onboard user completed without project id"):
+		return "onboardUser completed without project_id"
+	default:
+		return fmt.Sprintf("Failed to complete Gemini CLI onboarding: %s", msg)
+	}
+}
+
+func formatGeminiCloudAPIStatusError(err error) string {
+	if err == nil {
+		return "Failed to verify Cloud AI API status"
+	}
+	msg := strings.TrimSpace(err.Error())
+	if msg == "" {
+		return "Failed to verify Cloud AI API status"
+	}
+	return fmt.Sprintf("Failed to verify Cloud AI API status: %s", msg)
+}
+
+func formatGeminiCloudAPINotEnabled(projectID string) string {
+	trimmed := strings.TrimSpace(projectID)
+	if trimmed == "" {
+		return "Cloud AI API not enabled"
+	}
+	return fmt.Sprintf("Cloud AI API not enabled for project %s", trimmed)
 }
 
 func ensureGeminiProjectAndOnboard(ctx context.Context, httpClient *http.Client, storage *geminiAuth.GeminiTokenStorage, requestedProject string) error {
@@ -2062,27 +2131,41 @@ func ensureGeminiProjectAndOnboard(ctx context.Context, httpClient *http.Client,
 	}
 
 	trimmedRequest := strings.TrimSpace(requestedProject)
-	if trimmedRequest == "" {
-		projects, errProjects := fetchGCPProjects(ctx, httpClient)
-		if errProjects != nil {
-			return fmt.Errorf("fetch project list: %w", errProjects)
-		}
-		if len(projects) == 0 {
-			return fmt.Errorf("no Google Cloud projects available for this account")
-		}
-		trimmedRequest = strings.TrimSpace(projects[0].ProjectID)
-		if trimmedRequest == "" {
-			return fmt.Errorf("resolved project id is empty")
-		}
-		storage.Auto = true
-	} else {
+	if trimmedRequest != "" {
 		storage.Auto = false
+		if err := performGeminiCLISetup(ctx, httpClient, storage, trimmedRequest); err != nil {
+			return err
+		}
+		if strings.TrimSpace(storage.ProjectID) == "" {
+			storage.ProjectID = trimmedRequest
+		}
+		return nil
 	}
 
+	storage.Auto = true
+	if err := performGeminiCLISetup(ctx, httpClient, storage, ""); err == nil {
+		if strings.TrimSpace(storage.ProjectID) != "" {
+			return nil
+		}
+		log.Warn("Gemini auto-discovery completed without project ID, falling back to project list")
+	} else {
+		log.WithError(err).Warn("Gemini auto-discovery failed, falling back to project list")
+	}
+
+	projects, errProjects := fetchGCPProjects(ctx, httpClient)
+	if errProjects != nil {
+		return fmt.Errorf("fetch project list: %w", errProjects)
+	}
+	if len(projects) == 0 {
+		return newProjectSelectionRequiredError("No Google Cloud projects available for this account; please specify project_id manually")
+	}
+	trimmedRequest = strings.TrimSpace(projects[0].ProjectID)
+	if trimmedRequest == "" {
+		return newProjectSelectionRequiredError("Fetched Google Cloud project list but no usable project_id was found; please specify project_id manually")
+	}
 	if err := performGeminiCLISetup(ctx, httpClient, storage, trimmedRequest); err != nil {
 		return err
 	}
-
 	if strings.TrimSpace(storage.ProjectID) == "" {
 		storage.ProjectID = trimmedRequest
 	}
@@ -2226,13 +2309,13 @@ func performGeminiCLISetup(ctx context.Context, httpClient *http.Client, storage
 			log.Debugf("Auto-discovery: onboarding in progress, attempt %d...", attempt)
 			select {
 			case <-autoCtx.Done():
-				return &projectSelectionRequiredError{}
+				return newProjectSelectionRequiredError("Auto-discovery timed out; please specify project_id manually")
 			case <-time.After(2 * time.Second):
 			}
 		}
 
 		if projectID == "" {
-			return &projectSelectionRequiredError{}
+			return newProjectSelectionRequiredError("Auto-discovery did not return a project_id; please specify project_id manually")
 		}
 		log.Infof("Auto-discovered project ID via onboarding: %s", projectID)
 	}

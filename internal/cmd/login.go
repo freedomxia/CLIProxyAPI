@@ -125,46 +125,67 @@ func DoLogin(cfg *config.Config, projectID string, options *LoginOptions) {
 		log.Infof("Auto-discovered project: %s", autoProject)
 		activatedProjects = []string{autoProject}
 	} else {
-		projects, errProjects := fetchGCPProjects(ctx, httpClient)
-		if errProjects != nil {
-			log.Errorf("Failed to get project list: %v", errProjects)
-			return
-		}
-
-		selectedProjectID := promptForProjectSelection(projects, trimmedProjectID, promptFn)
-		projectSelections, errSelection := resolveProjectSelections(selectedProjectID, projects)
-		if errSelection != nil {
-			log.Errorf("Invalid project selection: %v", errSelection)
-			return
-		}
-		if len(projectSelections) == 0 {
-			log.Error("No project selected; aborting login.")
-			return
-		}
-
-		seenProjects := make(map[string]bool)
-		for _, candidateID := range projectSelections {
-			log.Infof("Activating project %s", candidateID)
-			if errSetup := performGeminiCLISetup(ctx, httpClient, storage, candidateID); errSetup != nil {
-				if _, ok := errors.AsType[*projectSelectionRequiredError](errSetup); ok {
-					log.Error("Failed to start user onboarding: A project ID is required.")
-					showProjectSelectionHelp(storage.Email, projects)
-					return
+		if trimmedProjectID == "" {
+			log.Info("Code Assist mode: attempting automatic Gemini project detection before prompting for a project")
+			if errSetup := performGeminiCLISetup(ctx, httpClient, storage, ""); errSetup == nil {
+				autoProject := strings.TrimSpace(storage.ProjectID)
+				if autoProject != "" {
+					log.Infof("Auto-discovered project: %s", autoProject)
+					activatedProjects = []string{autoProject}
+				} else {
+					log.Warn("Gemini auto-discovery completed without project ID, falling back to project list")
 				}
-				log.Errorf("Failed to complete user setup: %v", errSetup)
+			} else {
+				log.WithError(errSetup).Warn("Gemini auto-discovery failed, falling back to project list")
+			}
+		}
+
+		if len(activatedProjects) == 0 {
+			projects, errProjects := fetchGCPProjects(ctx, httpClient)
+			if errProjects != nil {
+				log.Errorf("Failed to get project list: %v", errProjects)
 				return
 			}
-			finalID := strings.TrimSpace(storage.ProjectID)
-			if finalID == "" {
-				finalID = candidateID
+			if len(projects) == 0 {
+				log.Error("No Google Cloud projects available for this account. Please create one or specify a project ID.")
+				return
 			}
 
-			if seenProjects[finalID] {
-				log.Infof("Project %s already activated, skipping", finalID)
-				continue
+			selectedProjectID := promptForProjectSelection(projects, trimmedProjectID, promptFn)
+			projectSelections, errSelection := resolveProjectSelections(selectedProjectID, projects)
+			if errSelection != nil {
+				log.Errorf("Invalid project selection: %v", errSelection)
+				return
 			}
-			seenProjects[finalID] = true
-			activatedProjects = append(activatedProjects, finalID)
+			if len(projectSelections) == 0 {
+				log.Error("No project selected; aborting login.")
+				return
+			}
+
+			seenProjects := make(map[string]bool)
+			for _, candidateID := range projectSelections {
+				log.Infof("Activating project %s", candidateID)
+				if errSetup := performGeminiCLISetup(ctx, httpClient, storage, candidateID); errSetup != nil {
+					if _, ok := errors.AsType[*projectSelectionRequiredError](errSetup); ok {
+						log.Error("Failed to start user onboarding: A project ID is required.")
+						showProjectSelectionHelp(storage.Email, projects)
+						return
+					}
+					log.Errorf("Failed to complete user setup: %v", errSetup)
+					return
+				}
+				finalID := strings.TrimSpace(storage.ProjectID)
+				if finalID == "" {
+					finalID = candidateID
+				}
+
+				if seenProjects[finalID] {
+					log.Infof("Project %s already activated, skipping", finalID)
+					continue
+				}
+				seenProjects[finalID] = true
+				activatedProjects = append(activatedProjects, finalID)
+			}
 		}
 	}
 
