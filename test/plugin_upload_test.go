@@ -19,7 +19,8 @@ func newPluginTestHandler(t *testing.T) (*management.Handler, string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	cfg := &config.Config{
-		AuthDir: filepath.Join(tmpDir, "auths"),
+		AuthDir:                  filepath.Join(tmpDir, "auths"),
+		PluginAutoEnableOnUpdate: true,
 	}
 	if err := os.MkdirAll(cfg.AuthDir, 0o700); err != nil {
 		t.Fatalf("failed to create auth dir: %v", err)
@@ -45,6 +46,10 @@ func setupPluginRouter(h *management.Handler) *gin.Engine {
 		mgmt.PUT("/plugin-connection-token", h.PutPluginConnectionToken)
 		mgmt.PATCH("/plugin-connection-token", h.PutPluginConnectionToken)
 		mgmt.DELETE("/plugin-connection-token", h.DeletePluginConnectionToken)
+		mgmt.GET("/plugin-auto-enable-on-update", h.GetPluginAutoEnableOnUpdate)
+		mgmt.PUT("/plugin-auto-enable-on-update", h.PutPluginAutoEnableOnUpdate)
+		mgmt.PATCH("/plugin-auto-enable-on-update", h.PutPluginAutoEnableOnUpdate)
+		mgmt.DELETE("/plugin-auto-enable-on-update", h.DeletePluginAutoEnableOnUpdate)
 	}
 	return r
 }
@@ -544,5 +549,192 @@ func TestPluginConnectionTokenManagementEndpoints(t *testing.T) {
 	r.ServeHTTP(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestPluginAutoEnableOnUpdateManagementEndpoints(t *testing.T) {
+	h, _ := newPluginTestHandler(t)
+	r := setupPluginRouter(h)
+
+	req := httptest.NewRequest(http.MethodGet, "/v0/management/plugin-auto-enable-on-update", nil)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+	var getResp map[string]bool
+	if err := json.Unmarshal(w.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("failed to decode get response: %v", err)
+	}
+	if !getResp["plugin-auto-enable-on-update"] {
+		t.Fatalf("expected default auto-enable=true, got %#v", getResp["plugin-auto-enable-on-update"])
+	}
+
+	req = httptest.NewRequest(http.MethodPut, "/v0/management/plugin-auto-enable-on-update", bytes.NewBufferString(`{"value":false}`))
+	req.Header.Set("Content-Type", "application/json")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest(http.MethodGet, "/v0/management/plugin-auto-enable-on-update", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &getResp); err != nil {
+		t.Fatalf("failed to decode second get response: %v", err)
+	}
+	if getResp["plugin-auto-enable-on-update"] {
+		t.Fatalf("expected auto-enable=false after update")
+	}
+
+	req = httptest.NewRequest(http.MethodDelete, "/v0/management/plugin-auto-enable-on-update", nil)
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestUpdatePluginTokenPreservesDisabledStateWhenAutoEnableDisabled(t *testing.T) {
+	h, authDir := newPluginTestHandler(t)
+	h.SetConfig(&config.Config{
+		AuthDir:                  authDir,
+		PluginConnectionToken:    "expected",
+		PluginAutoEnableOnUpdate: false,
+	})
+	r := setupPluginRouter(h)
+
+	body := `{
+		"token":"expected",
+		"mode":"codex",
+		"credential":{
+			"refresh_token":"refresh-1",
+			"account_id":"acct-1",
+			"email":"codex@example.com",
+			"expired":"2030-01-02T03:04:05Z"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/plugin/update-token", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	entries, err := os.ReadDir(authDir)
+	if err != nil {
+		t.Fatalf("failed to read auth dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 auth file, got %d", len(entries))
+	}
+	filePath := filepath.Join(authDir, entries[0].Name())
+	if err = os.WriteFile(filePath, []byte(`{"type":"codex","account_id":"acct-1","email":"codex@example.com","refresh_token":"old","disabled":true}`), 0o600); err != nil {
+		t.Fatalf("failed to seed disabled auth file: %v", err)
+	}
+
+	updateBody := `{
+		"mode":"codex",
+		"credential":{
+			"refresh_token":"refresh-2",
+			"account_id":"acct-1",
+			"email":"codex@example.com",
+			"expired":"2030-02-02T03:04:05Z"
+		}
+	}`
+	req = httptest.NewRequest(http.MethodPost, "/api/plugin/update-token", bytes.NewBufferString(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer expected")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read updated auth file: %v", err)
+	}
+	var saved map[string]any
+	if err = json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("failed to decode updated auth file: %v", err)
+	}
+	if disabled, _ := saved["disabled"].(bool); !disabled {
+		t.Fatalf("expected disabled=true to be preserved, got %#v", saved["disabled"])
+	}
+}
+
+func TestUpdatePluginTokenAutoEnablesDisabledStateByDefault(t *testing.T) {
+	h, authDir := newPluginTestHandler(t)
+	h.SetConfig(&config.Config{
+		AuthDir:                  authDir,
+		PluginConnectionToken:    "expected",
+		PluginAutoEnableOnUpdate: true,
+	})
+	r := setupPluginRouter(h)
+
+	body := `{
+		"token":"expected",
+		"mode":"codex",
+		"credential":{
+			"refresh_token":"refresh-1",
+			"account_id":"acct-1",
+			"email":"codex@example.com",
+			"expired":"2030-01-02T03:04:05Z"
+		}
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/api/plugin/update-token", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	entries, err := os.ReadDir(authDir)
+	if err != nil {
+		t.Fatalf("failed to read auth dir: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 auth file, got %d", len(entries))
+	}
+	filePath := filepath.Join(authDir, entries[0].Name())
+	if err = os.WriteFile(filePath, []byte(`{"type":"codex","account_id":"acct-1","email":"codex@example.com","refresh_token":"old","disabled":true}`), 0o600); err != nil {
+		t.Fatalf("failed to seed disabled auth file: %v", err)
+	}
+
+	updateBody := `{
+		"mode":"codex",
+		"credential":{
+			"refresh_token":"refresh-2",
+			"account_id":"acct-1",
+			"email":"codex@example.com",
+			"expired":"2030-02-02T03:04:05Z"
+		}
+	}`
+	req = httptest.NewRequest(http.MethodPost, "/api/plugin/update-token", bytes.NewBufferString(updateBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer expected")
+	w = httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, w.Code, w.Body.String())
+	}
+
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read updated auth file: %v", err)
+	}
+	var saved map[string]any
+	if err = json.Unmarshal(data, &saved); err != nil {
+		t.Fatalf("failed to decode updated auth file: %v", err)
+	}
+	if disabled, _ := saved["disabled"].(bool); disabled {
+		t.Fatalf("expected disabled flag to be cleared, got %#v", saved["disabled"])
 	}
 }

@@ -31,6 +31,12 @@ remote-management:
 # Authentication directory (supports ~ for home directory)
 auth-dir: "~/.cli-proxy-api"
 
+# Plugin updater integration. Leave token empty to disable /api/plugin/*.
+plugin-connection-token: ""
+
+# When true, a plugin credential refresh automatically re-enables a previously disabled auth file.
+plugin-auto-enable-on-update: true
+
 # API keys for authentication
 api-keys:
   - "your-api-key-1"

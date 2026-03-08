@@ -338,3 +338,15 @@ func (h *Handler) DeletePluginConnectionToken(c *gin.Context) {
 	h.cfg.PluginConnectionToken = ""
 	h.persist(c)
 }
+
+// Plugin auto-enable on update
+func (h *Handler) GetPluginAutoEnableOnUpdate(c *gin.Context) {
+	c.JSON(200, gin.H{"plugin-auto-enable-on-update": h.cfg.PluginAutoEnableOnUpdate})
+}
+func (h *Handler) PutPluginAutoEnableOnUpdate(c *gin.Context) {
+	h.updateBoolField(c, func(v bool) { h.cfg.PluginAutoEnableOnUpdate = v })
+}
+func (h *Handler) DeletePluginAutoEnableOnUpdate(c *gin.Context) {
+	h.cfg.PluginAutoEnableOnUpdate = true
+	h.persist(c)
+}

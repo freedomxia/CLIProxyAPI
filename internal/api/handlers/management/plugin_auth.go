@@ -97,6 +97,14 @@ func (h *Handler) UpdatePluginToken(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
+	if !created {
+		if h.pluginAutoEnableOnUpdate() {
+			delete(metadata, "disabled")
+		} else if err = preservePluginDisabledState(dst, metadata); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+			return
+		}
+	}
 
 	data, err := json.Marshal(metadata)
 	if err != nil {
@@ -195,6 +203,34 @@ func (h *Handler) pluginConnectionToken() string {
 		return ""
 	}
 	return strings.TrimSpace(h.cfg.PluginConnectionToken)
+}
+
+func (h *Handler) pluginAutoEnableOnUpdate() bool {
+	if h == nil || h.cfg == nil {
+		return true
+	}
+	return h.cfg.PluginAutoEnableOnUpdate
+}
+
+func preservePluginDisabledState(path string, metadata map[string]any) error {
+	if strings.TrimSpace(path) == "" {
+		return nil
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("failed to read existing auth file: %w", err)
+	}
+	var existing map[string]any
+	if err = json.Unmarshal(data, &existing); err != nil {
+		return nil
+	}
+	if boolValue(existing["disabled"]) {
+		metadata["disabled"] = true
+	}
+	return nil
 }
 
 func pluginOptionalPayload(c *gin.Context) ([]byte, map[string]any, error) {

@@ -531,6 +531,10 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/plugin-connection-token", s.mgmt.PutPluginConnectionToken)
 		mgmt.PATCH("/plugin-connection-token", s.mgmt.PutPluginConnectionToken)
 		mgmt.DELETE("/plugin-connection-token", s.mgmt.DeletePluginConnectionToken)
+		mgmt.GET("/plugin-auto-enable-on-update", s.mgmt.GetPluginAutoEnableOnUpdate)
+		mgmt.PUT("/plugin-auto-enable-on-update", s.mgmt.PutPluginAutoEnableOnUpdate)
+		mgmt.PATCH("/plugin-auto-enable-on-update", s.mgmt.PutPluginAutoEnableOnUpdate)
+		mgmt.DELETE("/plugin-auto-enable-on-update", s.mgmt.DeletePluginAutoEnableOnUpdate)
 
 		mgmt.POST("/api-call", s.mgmt.APICall)
 

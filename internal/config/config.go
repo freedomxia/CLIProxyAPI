@@ -43,6 +43,8 @@ type Config struct {
 
 	// PluginConnectionToken authorizes external token updater integrations on /api/plugin/*.
 	PluginConnectionToken string `yaml:"plugin-connection-token" json:"plugin-connection-token"`
+	// PluginAutoEnableOnUpdate re-enables disabled auth files when the plugin updater refreshes their credentials.
+	PluginAutoEnableOnUpdate bool `yaml:"plugin-auto-enable-on-update" json:"plugin-auto-enable-on-update"`
 
 	// Debug enables or disables debug-level logging and other debug features.
 	Debug bool `yaml:"debug" json:"debug"`
@@ -544,6 +546,7 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 	cfg.LogsMaxTotalSizeMB = 0
 	cfg.ErrorLogsMaxFiles = 10
 	cfg.UsageStatisticsEnabled = false
+	cfg.PluginAutoEnableOnUpdate = true
 	cfg.DisableCooling = false
 	cfg.Pprof.Enable = false
 	cfg.Pprof.Addr = DefaultPprofAddr
