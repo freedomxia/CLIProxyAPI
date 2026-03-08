@@ -32,7 +32,7 @@ func TestRegisterManagementRoutes(t *testing.T) {
 	m.setProxy(proxy)
 
 	base := &handlers.BaseAPIHandler{}
-	m.registerManagementRoutes(r, base, nil)
+	m.registerManagementRoutes(r, base, nil, nil)
 	srv := httptest.NewServer(r)
 	defer srv.Close()
 

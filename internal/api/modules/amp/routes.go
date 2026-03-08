@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	managementhandlers "github.com/router-for-me/CLIProxyAPI/v6/internal/api/handlers/management"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/logging"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers"
 	"github.com/router-for-me/CLIProxyAPI/v6/sdk/api/handlers/claude"
@@ -116,6 +117,10 @@ func noCORSMiddleware() gin.HandlerFunc {
 // proxy is disabled, preventing noisy localhost warnings and accidental exposure.
 func (m *AmpModule) managementAvailabilityMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
+		if isBridgeCompatibleAuthPath(c.Request.Method, c.Request.URL.Path) {
+			c.Next()
+			return
+		}
 		if m.getProxy() == nil {
 			logging.SkipGinRequestLogging(c)
 			c.AbortWithStatusJSON(http.StatusServiceUnavailable, gin.H{
@@ -145,7 +150,7 @@ func wrapManagementAuth(auth gin.HandlerFunc, prefixes ...string) gin.HandlerFun
 // These routes proxy through to the Amp control plane for OAuth, user management, etc.
 // Uses dynamic middleware and proxy getter for hot-reload support.
 // The auth middleware validates Authorization header against configured API keys.
-func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, baseHandler *handlers.BaseAPIHandler, auth gin.HandlerFunc) {
+func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, baseHandler *handlers.BaseAPIHandler, auth gin.HandlerFunc, bridge *managementhandlers.Handler) {
 	ampAPI := engine.Group("/api")
 
 	// Always disable CORS for management routes to prevent browser-based attacks
@@ -185,13 +190,20 @@ func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, baseHandler *ha
 		proxy.ServeHTTP(c.Writer, c.Request)
 	}
 
+	authProxyOrBridge := func(c *gin.Context) {
+		if bridge != nil && handleAuthBridge(c, bridge) {
+			return
+		}
+		proxyHandler(c)
+	}
+
 	// Management routes - these are proxied directly to Amp upstream
 	ampAPI.Any("/internal", proxyHandler)
 	ampAPI.Any("/internal/*path", proxyHandler)
 	ampAPI.Any("/user", proxyHandler)
 	ampAPI.Any("/user/*path", proxyHandler)
-	ampAPI.Any("/auth", proxyHandler)
-	ampAPI.Any("/auth/*path", proxyHandler)
+		ampAPI.Any("/auth", authProxyOrBridge)
+		ampAPI.Any("/auth/*path", authProxyOrBridge)
 	ampAPI.Any("/meta", proxyHandler)
 	ampAPI.Any("/meta/*path", proxyHandler)
 	ampAPI.Any("/ads", proxyHandler)
@@ -225,8 +237,8 @@ func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, baseHandler *ha
 	// Root-level auth routes for CLI login flow
 	// Amp uses multiple auth routes: /auth/cli-login, /auth/callback, /auth/sign-in, /auth/logout
 	// We proxy all /auth/* to support the complete OAuth flow
-	engine.Any("/auth", append(rootMiddleware, proxyHandler)...)
-	engine.Any("/auth/*path", append(rootMiddleware, proxyHandler)...)
+		engine.Any("/auth", append(rootMiddleware, authProxyOrBridge)...)
+		engine.Any("/auth/*path", append(rootMiddleware, authProxyOrBridge)...)
 
 	// Google v1beta1 passthrough with OAuth fallback
 	// AMP CLI uses non-standard paths like /publishers/google/models/...
@@ -254,6 +266,49 @@ func (m *AmpModule) registerManagementRoutes(engine *gin.Engine, baseHandler *ha
 		// Non-POST or no local provider available -> proxy upstream
 		proxyHandler(c)
 	})
+}
+
+func isBridgeCompatibleAuthPath(method, path string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	switch path {
+	case "/auth/login", "/auth/start", "/auth/callback-url", "/api/auth/login", "/api/auth/start", "/api/auth/callback-url":
+		return true
+	default:
+		return false
+	}
+}
+
+func handleAuthBridge(c *gin.Context, bridge *managementhandlers.Handler) bool {
+	if c == nil || bridge == nil || c.Request == nil {
+		return false
+	}
+	if !isBridgeCompatibleAuthPath(c.Request.Method, c.Request.URL.Path) {
+		return false
+	}
+	switch c.Request.URL.Path {
+	case "/auth/login":
+		bridge.BridgeLogin(c)
+		return true
+	case "/api/auth/login":
+		bridge.BridgeLogin(c)
+		return true
+	case "/auth/start":
+		bridge.BridgeStartOAuth(c)
+		return true
+	case "/api/auth/start":
+		bridge.BridgeStartOAuth(c)
+		return true
+	case "/auth/callback-url":
+		bridge.BridgeCallbackURL(c)
+		return true
+	case "/api/auth/callback-url":
+		bridge.BridgeCallbackURL(c)
+		return true
+	default:
+		return false
+	}
 }
 
 // registerProviderAliases registers /api/provider/{provider}/... routes

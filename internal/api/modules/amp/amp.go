@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	"github.com/gin-gonic/gin"
+	managementhandlers "github.com/router-for-me/CLIProxyAPI/v6/internal/api/handlers/management"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/api/modules"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
 	sdkaccess "github.com/router-for-me/CLIProxyAPI/v6/sdk/access"
@@ -41,6 +42,8 @@ type AmpModule struct {
 	// configMu protects lastConfig for partial reload comparison
 	configMu   sync.RWMutex
 	lastConfig *config.AmpCode
+
+	authBridge *managementhandlers.Handler
 }
 
 // New creates a new Amp routing module with the given options.
@@ -135,9 +138,10 @@ func (m *AmpModule) Register(ctx modules.Context) error {
 		// Always register provider aliases - these work without an upstream
 		m.registerProviderAliases(ctx.Engine, ctx.BaseHandler, auth)
 
-		// Register management proxy routes once; middleware will gate access when upstream is unavailable.
-		// Pass auth middleware to require valid API key for all management routes.
-		m.registerManagementRoutes(ctx.Engine, ctx.BaseHandler, auth)
+			// Register management proxy routes once; middleware will gate access when upstream is unavailable.
+			// Pass auth middleware to require valid API key for all management routes.
+			m.authBridge = managementhandlers.NewHandlerWithoutConfigFilePath(ctx.Config, nil)
+			m.registerManagementRoutes(ctx.Engine, ctx.BaseHandler, auth, m.authBridge)
 
 		// If no upstream URL, skip proxy routes but provider aliases are still available
 		if upstreamURL == "" {
@@ -179,6 +183,10 @@ func (m *AmpModule) getAuthMiddleware(ctx modules.Context) gin.HandlerFunc {
 // Supports hot-reload for: model-mappings, upstream-api-key, upstream-url, restrict-management-to-localhost.
 func (m *AmpModule) OnConfigUpdated(cfg *config.Config) error {
 	newSettings := cfg.AmpCode
+
+	if m.authBridge != nil {
+		m.authBridge.SetConfig(cfg)
+	}
 
 	// Get previous config for comparison
 	m.configMu.RLock()
