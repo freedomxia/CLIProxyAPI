@@ -421,6 +421,8 @@ func (s *Service) ensureExecutorsForAuthWithMode(a *coreauth.Auth, forceReplace 
 		s.coreManager.RegisterExecutor(executor.NewAntigravityExecutor(s.cfg))
 	case "claude":
 		s.coreManager.RegisterExecutor(executor.NewClaudeExecutor(s.cfg))
+	case "notion":
+		s.coreManager.RegisterExecutor(executor.NewNotionExecutor(s.cfg))
 	case "qwen":
 		s.coreManager.RegisterExecutor(executor.NewQwenExecutor(s.cfg))
 	case "iflow":
@@ -854,6 +856,17 @@ func (s *Service) registerModelsForAuth(a *coreauth.Auth) {
 			}
 		}
 		models = applyExcludedModels(models, excluded)
+	case "notion":
+		models = registry.GetNotionModels()
+		if entry := s.resolveConfigNotionKey(a); entry != nil {
+			if len(entry.Models) > 0 {
+				models = buildNotionConfigModels(entry)
+			}
+			if authKind == "apikey" {
+				excluded = entry.ExcludedModels
+			}
+		}
+		models = applyExcludedModels(models, excluded)
 	case "qwen":
 		models = registry.GetQwenModels()
 		models = applyExcludedModels(models, excluded)
@@ -1053,6 +1066,42 @@ func (s *Service) resolveConfigVertexCompatKey(auth *coreauth.Auth) *config.Vert
 		for i := range s.cfg.VertexCompatAPIKey {
 			entry := &s.cfg.VertexCompatAPIKey[i]
 			if strings.EqualFold(strings.TrimSpace(entry.APIKey), attrKey) {
+				return entry
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) resolveConfigNotionKey(auth *coreauth.Auth) *config.NotionKey {
+	if auth == nil || s.cfg == nil {
+		return nil
+	}
+	var attrKey, attrBase, attrSpace, attrUser string
+	if auth.Attributes != nil {
+		attrKey = strings.TrimSpace(auth.Attributes["api_key"])
+		attrBase = strings.TrimSpace(auth.Attributes["base_url"])
+		attrSpace = strings.TrimSpace(auth.Attributes["space_id"])
+		attrUser = strings.TrimSpace(auth.Attributes["user_id"])
+	}
+	for i := range s.cfg.NotionKey {
+		entry := &s.cfg.NotionKey[i]
+		cfgKey := strings.TrimSpace(entry.TokenV2)
+		cfgBase := strings.TrimSpace(entry.BaseURL)
+		cfgSpace := strings.TrimSpace(entry.SpaceID)
+		cfgUser := strings.TrimSpace(entry.UserID)
+		if attrKey != "" && attrSpace != "" && attrUser != "" {
+			if strings.EqualFold(cfgKey, attrKey) && strings.EqualFold(cfgSpace, attrSpace) && strings.EqualFold(cfgUser, attrUser) {
+				if attrBase == "" || strings.EqualFold(cfgBase, attrBase) {
+					return entry
+				}
+			}
+		}
+	}
+	if attrKey != "" {
+		for i := range s.cfg.NotionKey {
+			entry := &s.cfg.NotionKey[i]
+			if strings.EqualFold(strings.TrimSpace(entry.TokenV2), attrKey) {
 				return entry
 			}
 		}
@@ -1346,6 +1395,13 @@ func buildCodexConfigModels(entry *config.CodexKey) []*ModelInfo {
 		return nil
 	}
 	return buildConfigModels(entry.Models, "openai", "openai")
+}
+
+func buildNotionConfigModels(entry *config.NotionKey) []*ModelInfo {
+	if entry == nil {
+		return nil
+	}
+	return buildConfigModels(entry.Models, "notion", "notion")
 }
 
 func rewriteModelInfoName(name, oldID, newID string) string {

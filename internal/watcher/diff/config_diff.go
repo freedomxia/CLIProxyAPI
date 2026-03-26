@@ -280,6 +280,47 @@ func BuildConfigChangeDetails(oldCfg, newCfg *config.Config) []string {
 		}
 	}
 
+	// Notion token_v2 accounts
+	if len(oldCfg.NotionKey) != len(newCfg.NotionKey) {
+		changes = append(changes, fmt.Sprintf("notion-api-key count: %d -> %d", len(oldCfg.NotionKey), len(newCfg.NotionKey)))
+	} else {
+		for i := range oldCfg.NotionKey {
+			o := oldCfg.NotionKey[i]
+			n := newCfg.NotionKey[i]
+			if strings.TrimSpace(o.SpaceID) != strings.TrimSpace(n.SpaceID) {
+				changes = append(changes, fmt.Sprintf("notion[%d].space-id: %s -> %s", i, strings.TrimSpace(o.SpaceID), strings.TrimSpace(n.SpaceID)))
+			}
+			if strings.TrimSpace(o.UserID) != strings.TrimSpace(n.UserID) {
+				changes = append(changes, fmt.Sprintf("notion[%d].user-id: %s -> %s", i, strings.TrimSpace(o.UserID), strings.TrimSpace(n.UserID)))
+			}
+			if strings.TrimSpace(o.BaseURL) != strings.TrimSpace(n.BaseURL) {
+				changes = append(changes, fmt.Sprintf("notion[%d].base-url: %s -> %s", i, strings.TrimSpace(o.BaseURL), strings.TrimSpace(n.BaseURL)))
+			}
+			if strings.TrimSpace(o.ProxyURL) != strings.TrimSpace(n.ProxyURL) {
+				changes = append(changes, fmt.Sprintf("notion[%d].proxy-url: %s -> %s", i, formatProxyURL(o.ProxyURL), formatProxyURL(n.ProxyURL)))
+			}
+			if strings.TrimSpace(o.Prefix) != strings.TrimSpace(n.Prefix) {
+				changes = append(changes, fmt.Sprintf("notion[%d].prefix: %s -> %s", i, strings.TrimSpace(o.Prefix), strings.TrimSpace(n.Prefix)))
+			}
+			if strings.TrimSpace(o.TokenV2) != strings.TrimSpace(n.TokenV2) {
+				changes = append(changes, fmt.Sprintf("notion[%d].token-v2: updated", i))
+			}
+			if !equalStringMap(o.Headers, n.Headers) {
+				changes = append(changes, fmt.Sprintf("notion[%d].headers: updated", i))
+			}
+			oldModels := ComputeNotionModelsHash(o.Models)
+			newModels := ComputeNotionModelsHash(n.Models)
+			if oldModels != newModels {
+				changes = append(changes, fmt.Sprintf("notion[%d].models: updated (%d -> %d entries)", i, len(o.Models), len(n.Models)))
+			}
+			oldExcluded := SummarizeExcludedModels(o.ExcludedModels)
+			newExcluded := SummarizeExcludedModels(n.ExcludedModels)
+			if oldExcluded.hash != newExcluded.hash {
+				changes = append(changes, fmt.Sprintf("notion[%d].excluded-models: updated (%d -> %d entries)", i, oldExcluded.count, newExcluded.count))
+			}
+		}
+	}
+
 	// Vertex-compatible API keys
 	if len(oldCfg.VertexCompatAPIKey) != len(newCfg.VertexCompatAPIKey) {
 		changes = append(changes, fmt.Sprintf("vertex-api-key count: %d -> %d", len(oldCfg.VertexCompatAPIKey), len(newCfg.VertexCompatAPIKey)))

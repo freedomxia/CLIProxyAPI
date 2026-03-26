@@ -32,6 +32,7 @@ import (
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/misc"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/registry"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/watcher/synthesizer"
 	sdkAuth "github.com/router-for-me/CLIProxyAPI/v6/sdk/auth"
 	coreauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
 	log "github.com/sirupsen/logrus"
@@ -380,8 +381,29 @@ func (h *Handler) buildAuthFileEntry(auth *coreauth.Auth) gin.H {
 			entry["account_type"] = accountType
 		}
 		if account != "" {
-			entry["account"] = account
+			entry["account"] = redactAuthAccount(accountType, account)
 		}
+	}
+	if prefix := strings.TrimSpace(auth.Prefix); prefix != "" {
+		entry["prefix"] = prefix
+	}
+	if proxyURL := strings.TrimSpace(auth.ProxyURL); proxyURL != "" {
+		entry["proxy_url"] = proxyURL
+	}
+	if authKind := strings.TrimSpace(authAttribute(auth, "auth_kind")); authKind != "" {
+		entry["auth_kind"] = authKind
+	}
+	if priority := strings.TrimSpace(authAttribute(auth, "priority")); priority != "" {
+		entry["priority"] = priority
+	}
+	if baseURL := strings.TrimSpace(authAttribute(auth, "base_url")); baseURL != "" {
+		entry["base_url"] = baseURL
+	}
+	if spaceID := strings.TrimSpace(authAttribute(auth, "space_id")); spaceID != "" {
+		entry["space_id"] = spaceID
+	}
+	if userID := strings.TrimSpace(authAttribute(auth, "user_id")); userID != "" {
+		entry["user_id"] = userID
 	}
 	if !auth.CreatedAt.IsZero() {
 		entry["created_at"] = auth.CreatedAt
@@ -483,6 +505,59 @@ func authAttribute(auth *coreauth.Auth, key string) string {
 		return ""
 	}
 	return auth.Attributes[key]
+}
+
+func redactAuthAccount(accountType, account string) string {
+	account = strings.TrimSpace(account)
+	if account == "" {
+		return ""
+	}
+	if !strings.EqualFold(strings.TrimSpace(accountType), "api_key") {
+		return account
+	}
+	if len(account) <= 8 {
+		return strings.Repeat("*", len(account))
+	}
+	return account[:4] + strings.Repeat("*", len(account)-8) + account[len(account)-4:]
+}
+
+func extractExcludedModelsForAuthFile(metadata map[string]any) []string {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["excluded_models"]
+	if !ok {
+		raw, ok = metadata["excluded-models"]
+	}
+	if !ok {
+		return nil
+	}
+
+	items := make([]string, 0)
+	appendItem := func(value string) {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+
+	switch typed := raw.(type) {
+	case []string:
+		for _, item := range typed {
+			appendItem(item)
+		}
+	case []any:
+		for _, item := range typed {
+			if text, ok := item.(string); ok {
+				appendItem(text)
+			}
+		}
+	case string:
+		for _, item := range strings.Split(typed, ",") {
+			appendItem(item)
+		}
+	}
+
+	return items
 }
 
 func isRuntimeOnlyAuth(auth *coreauth.Auth) bool {
@@ -728,14 +803,37 @@ func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []
 		return fmt.Errorf("invalid auth file: %w", err)
 	}
 	provider, _ := metadata["type"].(string)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "gemini" {
+		provider = "gemini-cli"
+	}
 	if provider == "" {
 		provider = "unknown"
 	}
-	label := provider
-	if email, ok := metadata["email"].(string); ok && email != "" {
-		label = email
+	label := strings.TrimSpace(provider)
+	if rawLabel, ok := metadata["label"].(string); ok && strings.TrimSpace(rawLabel) != "" {
+		label = strings.TrimSpace(rawLabel)
+	} else if email, ok := metadata["email"].(string); ok && strings.TrimSpace(email) != "" {
+		label = strings.TrimSpace(email)
 	}
 	lastRefresh, hasLastRefresh := extractLastRefreshTimestamp(metadata)
+	disabled, _ := metadata["disabled"].(bool)
+	status := coreauth.StatusActive
+	if disabled {
+		status = coreauth.StatusDisabled
+	}
+	proxyURL := ""
+	if rawProxyURL, ok := metadata["proxy_url"].(string); ok {
+		proxyURL = strings.TrimSpace(rawProxyURL)
+	}
+	prefix := ""
+	if rawPrefix, ok := metadata["prefix"].(string); ok {
+		trimmed := strings.TrimSpace(rawPrefix)
+		trimmed = strings.Trim(trimmed, "/")
+		if trimmed != "" && !strings.Contains(trimmed, "/") {
+			prefix = trimmed
+		}
+	}
 
 	authID := h.authIDForPath(path)
 	if authID == "" {
@@ -745,17 +843,26 @@ func (h *Handler) registerAuthFromFile(ctx context.Context, path string, data []
 		"path":   path,
 		"source": path,
 	}
+	coreauth.MergeProviderMetadataAttributes(attr, provider, metadata)
+	authKind := strings.ToLower(strings.TrimSpace(attr["auth_kind"]))
+	if authKind == "" {
+		authKind = "oauth"
+	}
 	auth := &coreauth.Auth{
 		ID:         authID,
 		Provider:   provider,
+		Prefix:     prefix,
 		FileName:   filepath.Base(path),
 		Label:      label,
-		Status:     coreauth.StatusActive,
+		Status:     status,
+		Disabled:   disabled,
+		ProxyURL:   proxyURL,
 		Attributes: attr,
 		Metadata:   metadata,
 		CreatedAt:  time.Now(),
 		UpdatedAt:  time.Now(),
 	}
+	synthesizer.ApplyAuthExcludedModelsMeta(auth, h.cfg, extractExcludedModelsForAuthFile(metadata), authKind)
 	if hasLastRefresh {
 		auth.LastRefreshedAt = lastRefresh
 	}

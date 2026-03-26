@@ -156,6 +156,65 @@ func TestFileSynthesizer_Synthesize_GeminiProviderMapping(t *testing.T) {
 	}
 }
 
+func TestFileSynthesizer_Synthesize_NotionCredentialJSON(t *testing.T) {
+	tempDir := t.TempDir()
+
+	authData := map[string]any{
+		"type":     "notion",
+		"token_v2": "token-secret",
+		"space_id": "space-1",
+		"user_id":  "user-1",
+		"base_url": "https://www.notion.so",
+		"headers": map[string]string{
+			"x-test-header": "from-json",
+		},
+	}
+	data, _ := json.Marshal(authData)
+	err := os.WriteFile(filepath.Join(tempDir, "notion-auth.json"), data, 0o644)
+	if err != nil {
+		t.Fatalf("failed to write auth file: %v", err)
+	}
+
+	synth := NewFileSynthesizer()
+	ctx := &SynthesisContext{
+		Config:      &config.Config{},
+		AuthDir:     tempDir,
+		Now:         time.Now(),
+		IDGenerator: NewStableIDGenerator(),
+	}
+
+	auths, err := synth.Synthesize(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(auths))
+	}
+
+	auth := auths[0]
+	if auth.Provider != "notion" {
+		t.Fatalf("expected provider notion, got %s", auth.Provider)
+	}
+	if got := auth.Attributes["token_v2"]; got != "token-secret" {
+		t.Fatalf("expected token_v2 to be projected, got %q", got)
+	}
+	if got := auth.Attributes["space_id"]; got != "space-1" {
+		t.Fatalf("expected space_id to be projected, got %q", got)
+	}
+	if got := auth.Attributes["user_id"]; got != "user-1" {
+		t.Fatalf("expected user_id to be projected, got %q", got)
+	}
+	if got := auth.Attributes["base_url"]; got != "https://www.notion.so" {
+		t.Fatalf("expected base_url to be projected, got %q", got)
+	}
+	if got := auth.Attributes["header:x-test-header"]; got != "from-json" {
+		t.Fatalf("expected custom header to be projected, got %q", got)
+	}
+	if got := auth.Attributes["auth_kind"]; got != "apikey" {
+		t.Fatalf("expected auth_kind=apikey, got %q", got)
+	}
+}
+
 func TestFileSynthesizer_Synthesize_SkipsInvalidFiles(t *testing.T) {
 	tempDir := t.TempDir()
 

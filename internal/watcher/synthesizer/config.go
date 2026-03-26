@@ -10,7 +10,7 @@ import (
 )
 
 // ConfigSynthesizer generates Auth entries from configuration API keys.
-// It handles Gemini, Claude, Codex, OpenAI-compat, and Vertex-compat providers.
+// It handles Gemini, Claude, Codex, OpenAI-compat, Notion, and Vertex-compat providers.
 type ConfigSynthesizer struct{}
 
 // NewConfigSynthesizer creates a new ConfigSynthesizer instance.
@@ -33,6 +33,8 @@ func (s *ConfigSynthesizer) Synthesize(ctx *SynthesisContext) ([]*coreauth.Auth,
 	out = append(out, s.synthesizeCodexKeys(ctx)...)
 	// OpenAI-compat
 	out = append(out, s.synthesizeOpenAICompat(ctx)...)
+	// Notion token_v2 accounts
+	out = append(out, s.synthesizeNotionKeys(ctx)...)
 	// Vertex-compat
 	out = append(out, s.synthesizeVertexCompat(ctx)...)
 
@@ -268,6 +270,61 @@ func (s *ConfigSynthesizer) synthesizeOpenAICompat(ctx *SynthesisContext) []*cor
 			}
 			out = append(out, a)
 		}
+	}
+	return out
+}
+
+// synthesizeNotionKeys creates Auth entries for Notion token_v2 accounts.
+func (s *ConfigSynthesizer) synthesizeNotionKeys(ctx *SynthesisContext) []*coreauth.Auth {
+	cfg := ctx.Config
+	now := ctx.Now
+	idGen := ctx.IDGenerator
+
+	out := make([]*coreauth.Auth, 0, len(cfg.NotionKey))
+	for i := range cfg.NotionKey {
+		entry := cfg.NotionKey[i]
+		token := strings.TrimSpace(entry.TokenV2)
+		spaceID := strings.TrimSpace(entry.SpaceID)
+		userID := strings.TrimSpace(entry.UserID)
+		if token == "" || spaceID == "" || userID == "" {
+			continue
+		}
+
+		prefix := strings.TrimSpace(entry.Prefix)
+		base := strings.TrimSpace(entry.BaseURL)
+		proxyURL := strings.TrimSpace(entry.ProxyURL)
+		id, authToken := idGen.Next("notion:token", token, spaceID, userID, base, proxyURL)
+		attrs := map[string]string{
+			"source":    fmt.Sprintf("config:notion[%s]", authToken),
+			"api_key":   token,
+			"token_v2":  token,
+			"space_id":  spaceID,
+			"user_id":   userID,
+			"auth_kind": "api_key",
+		}
+		if entry.Priority != 0 {
+			attrs["priority"] = strconv.Itoa(entry.Priority)
+		}
+		if base != "" {
+			attrs["base_url"] = base
+		}
+		if hash := diff.ComputeNotionModelsHash(entry.Models); hash != "" {
+			attrs["models_hash"] = hash
+		}
+		addConfigHeadersToAttrs(entry.Headers, attrs)
+		a := &coreauth.Auth{
+			ID:         id,
+			Provider:   "notion",
+			Label:      "notion-token",
+			Prefix:     prefix,
+			Status:     coreauth.StatusActive,
+			ProxyURL:   proxyURL,
+			Attributes: attrs,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		ApplyAuthExcludedModelsMeta(a, cfg, entry.ExcludedModels, "apikey")
+		out = append(out, a)
 	}
 	return out
 }

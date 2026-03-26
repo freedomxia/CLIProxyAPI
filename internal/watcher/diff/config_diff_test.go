@@ -146,6 +146,9 @@ func TestBuildConfigChangeDetails_ModelPrefixes(t *testing.T) {
 		ClaudeKey: []config.ClaudeKey{
 			{APIKey: "c1", Prefix: "old-c", BaseURL: "http://c", ProxyURL: "http://cp"},
 		},
+		NotionKey: []config.NotionKey{
+			{TokenV2: "n1", SpaceID: "space-a", UserID: "user-a", Prefix: "old-n", BaseURL: "http://n", ProxyURL: "http://np"},
+		},
 		CodexKey: []config.CodexKey{
 			{APIKey: "x1", Prefix: "old-x", BaseURL: "http://x", ProxyURL: "http://xp"},
 		},
@@ -160,6 +163,9 @@ func TestBuildConfigChangeDetails_ModelPrefixes(t *testing.T) {
 		ClaudeKey: []config.ClaudeKey{
 			{APIKey: "c1", Prefix: "new-c", BaseURL: "http://c", ProxyURL: "http://cp"},
 		},
+		NotionKey: []config.NotionKey{
+			{TokenV2: "n1", SpaceID: "space-a", UserID: "user-a", Prefix: "new-n", BaseURL: "http://n", ProxyURL: "http://np"},
+		},
 		CodexKey: []config.CodexKey{
 			{APIKey: "x1", Prefix: "new-x", BaseURL: "http://x", ProxyURL: "http://xp"},
 		},
@@ -171,6 +177,7 @@ func TestBuildConfigChangeDetails_ModelPrefixes(t *testing.T) {
 	changes := BuildConfigChangeDetails(oldCfg, newCfg)
 	expectContains(t, changes, "gemini[0].prefix: old-g -> new-g")
 	expectContains(t, changes, "claude[0].prefix: old-c -> new-c")
+	expectContains(t, changes, "notion[0].prefix: old-n -> new-n")
 	expectContains(t, changes, "codex[0].prefix: old-x -> new-x")
 	expectContains(t, changes, "vertex[0].prefix: old-v -> new-v")
 }

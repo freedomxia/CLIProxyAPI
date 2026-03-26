@@ -69,6 +69,21 @@ func countOpenAIChatTokens(enc tokenizer.Codec, payload []byte) (int64, error) {
 	return int64(count), nil
 }
 
+func countPlainTextTokens(enc tokenizer.Codec, text string) (int64, error) {
+	if enc == nil {
+		return 0, fmt.Errorf("encoder is nil")
+	}
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return 0, nil
+	}
+	count, err := enc.Count(trimmed)
+	if err != nil {
+		return 0, err
+	}
+	return int64(count), nil
+}
+
 // buildOpenAIUsageJSON returns a minimal usage structure understood by downstream translators.
 func buildOpenAIUsageJSON(count int64) []byte {
 	return []byte(fmt.Sprintf(`{"usage":{"prompt_tokens":%d,"completion_tokens":0,"total_tokens":%d}}`, count, count))

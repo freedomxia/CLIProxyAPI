@@ -237,20 +237,35 @@ func (s *FileTokenStore) readAuthFile(path, baseDir string) (*cliproxyauth.Auth,
 	if disabled {
 		status = cliproxyauth.StatusDisabled
 	}
+	proxyURL := ""
+	if rawProxyURL, ok := metadata["proxy_url"].(string); ok {
+		proxyURL = strings.TrimSpace(rawProxyURL)
+	}
+	prefix := ""
+	if rawPrefix, ok := metadata["prefix"].(string); ok {
+		trimmed := strings.TrimSpace(rawPrefix)
+		trimmed = strings.Trim(trimmed, "/")
+		if trimmed != "" && !strings.Contains(trimmed, "/") {
+			prefix = trimmed
+		}
+	}
 	auth := &cliproxyauth.Auth{
 		ID:               id,
 		Provider:         provider,
+		Prefix:           prefix,
 		FileName:         id,
 		Label:            s.labelFor(metadata),
 		Status:           status,
 		Disabled:         disabled,
-		Attributes:       map[string]string{"path": path},
+		ProxyURL:         proxyURL,
+		Attributes:       map[string]string{"path": path, "source": path},
 		Metadata:         metadata,
 		CreatedAt:        info.ModTime(),
 		UpdatedAt:        info.ModTime(),
 		LastRefreshedAt:  time.Time{},
 		NextRefreshAfter: time.Time{},
 	}
+	cliproxyauth.MergeProviderMetadataAttributes(auth.Attributes, provider, metadata)
 	if email, ok := metadata["email"].(string); ok && email != "" {
 		auth.Attributes["email"] = email
 	}

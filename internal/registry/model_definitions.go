@@ -145,6 +145,7 @@ func cloneModelInfos(models []*ModelInfo) []*ModelInfo {
 //   - qwen
 //   - iflow
 //   - kimi
+//   - notion
 //   - antigravity (returns static overrides only)
 func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 	key := strings.ToLower(strings.TrimSpace(channel))
@@ -167,6 +168,8 @@ func GetStaticModelDefinitionsByChannel(channel string) []*ModelInfo {
 		return GetIFlowModels()
 	case "kimi":
 		return GetKimiModels()
+	case "notion":
+		return GetNotionModels()
 	case "antigravity":
 		cfg := GetAntigravityModelConfig()
 		if len(cfg) == 0 {

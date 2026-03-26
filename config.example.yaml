@@ -204,6 +204,41 @@ nonstream-keepalive-interval: 0
 #         alias: "claude-opus-4.66"
 #       - name: "kimi-k2.5"
 #         alias: "claude-opus-4.66"
+#   # Example: bridge a local notion2api sidecar without changing CLIProxyAPI executors.
+#   # Custom request fields such as conversation_id are preserved on the OpenAI -> OpenAI path.
+#   - name: "notion2api"
+#     prefix: "notion"
+#     base-url: "http://127.0.0.1:8000/v1"
+#     api-key-entries:
+#       - api-key: "replace-with-your-notion2api-api-key"
+#     models:
+#       - name: "claude-sonnet4.6"
+#         alias: "notion/claude-sonnet4.6"
+#       - name: "claude-opus4.6"
+#         alias: "notion/claude-opus4.6"
+#       - name: "gpt-5.4"
+#         alias: "notion/gpt-5.4"
+#       - name: "gemini-3.1pro"
+#         alias: "notion/gemini-3.1pro"
+
+# Native Notion AI accounts (token_v2 cookie auth)
+# notion-api-key:
+#   - token-v2: "replace-with-your-token_v2"
+#     space-id: "replace-with-your-space-id"
+#     user-id: "replace-with-your-user-id"
+#     prefix: "notion"                           # optional: require calls like notion/gpt-5.4
+#     base-url: "https://www.notion.so"          # optional: override for testing/reverse proxy
+#     proxy-url: "socks5://proxy.example.com:1080" # optional per-account proxy override
+#     headers:
+#       X-Custom-Header: "custom-value"
+#     models:                                    # optional: override or extend model alias mapping
+#       - name: "gpt-5.4"                        # upstream/native model id used by CLIProxyAPI
+#         alias: "notion-gpt-5.4"                # client-visible alias
+#       - name: "claude-sonnet4.6"
+#         alias: "notion-sonnet"
+#     excluded-models:                           # optional: models to exclude from listing
+#       - "gpt-5.2"
+#       - "claude-*"
 
 # Vertex API keys (Vertex-compatible endpoints, use API key + base URL)
 # vertex-api-key:

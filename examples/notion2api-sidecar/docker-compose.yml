@@ -1,0 +1,49 @@
+services:
+  notion2api:
+    build:
+      context: ${NOTION2API_DIR}
+      dockerfile: Dockerfile
+    image: notion2api:local
+    restart: unless-stopped
+    environment:
+      NOTION_ACCOUNTS: ${NOTION_ACCOUNTS}
+      API_KEY: ${NOTION2API_API_KEY}
+      APP_MODE: ${NOTION2API_APP_MODE:-standard}
+      ALLOWED_ORIGINS: ${NOTION2API_ALLOWED_ORIGINS:-*}
+      SILICONFLOW_API_KEY: ${SILICONFLOW_API_KEY:-}
+      DB_PATH: /app/data/conversations.db
+      PYTHONUNBUFFERED: "1"
+      TZ: ${TZ:-Asia/Shanghai}
+    ports:
+      - "127.0.0.1:${NOTION2API_PORT:-8000}:8000"
+    volumes:
+      - ./data/notion2api:/app/data
+      - ./logs/notion2api:/app/logs
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  cli-proxy-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      args:
+        VERSION: dev
+        COMMIT: notion2api-example
+        BUILD_DATE: unknown
+    image: cli-proxy-api:local
+    restart: unless-stopped
+    depends_on:
+      notion2api:
+        condition: service_healthy
+    environment:
+      DEPLOY: ""
+    ports:
+      - "127.0.0.1:${CLI_PROXY_PORT:-8317}:8317"
+    volumes:
+      - ./config.yaml:/CLIProxyAPI/config.yaml:ro
+      - ./auths:/root/.cli-proxy-api
+      - ./logs/cli-proxy-api:/CLIProxyAPI/logs

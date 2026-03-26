@@ -486,6 +486,146 @@ func (h *Handler) DeleteOpenAICompat(c *gin.Context) {
 	c.JSON(400, gin.H{"error": "missing name or index"})
 }
 
+// notion-api-key: []NotionKey
+func (h *Handler) GetNotionKeys(c *gin.Context) {
+	c.JSON(200, gin.H{"notion-api-key": h.cfg.NotionKey})
+}
+
+func (h *Handler) PutNotionKeys(c *gin.Context) {
+	data, err := c.GetRawData()
+	if err != nil {
+		c.JSON(400, gin.H{"error": "failed to read body"})
+		return
+	}
+	var arr []config.NotionKey
+	if err = json.Unmarshal(data, &arr); err != nil {
+		var obj struct {
+			Items []config.NotionKey `json:"items"`
+		}
+		if err2 := json.Unmarshal(data, &obj); err2 != nil || len(obj.Items) == 0 {
+			c.JSON(400, gin.H{"error": "invalid body"})
+			return
+		}
+		arr = obj.Items
+	}
+	for i := range arr {
+		normalizeNotionKey(&arr[i])
+	}
+	h.cfg.NotionKey = arr
+	h.cfg.SanitizeNotionKeys()
+	h.persist(c)
+}
+
+func (h *Handler) PatchNotionKey(c *gin.Context) {
+	type notionKeyPatch struct {
+		TokenV2        *string               `json:"token-v2"`
+		SpaceID        *string               `json:"space-id"`
+		UserID         *string               `json:"user-id"`
+		Prefix         *string               `json:"prefix"`
+		BaseURL        *string               `json:"base-url"`
+		ProxyURL       *string               `json:"proxy-url"`
+		Headers        *map[string]string    `json:"headers"`
+		Models         *[]config.NotionModel `json:"models"`
+		ExcludedModels *[]string             `json:"excluded-models"`
+	}
+	var body struct {
+		Index *int            `json:"index"`
+		Match *string         `json:"match"`
+		Value *notionKeyPatch `json:"value"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil || body.Value == nil {
+		c.JSON(400, gin.H{"error": "invalid body"})
+		return
+	}
+
+	targetIndex := -1
+	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.NotionKey) {
+		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Match != nil {
+		match := strings.TrimSpace(*body.Match)
+		for i := range h.cfg.NotionKey {
+			if h.cfg.NotionKey[i].TokenV2 == match {
+				targetIndex = i
+				break
+			}
+		}
+	}
+	if targetIndex == -1 {
+		c.JSON(404, gin.H{"error": "item not found"})
+		return
+	}
+
+	entry := h.cfg.NotionKey[targetIndex]
+	if body.Value.TokenV2 != nil {
+		trimmed := strings.TrimSpace(*body.Value.TokenV2)
+		if trimmed == "" {
+			h.cfg.NotionKey = append(h.cfg.NotionKey[:targetIndex], h.cfg.NotionKey[targetIndex+1:]...)
+			h.cfg.SanitizeNotionKeys()
+			h.persist(c)
+			return
+		}
+		entry.TokenV2 = trimmed
+	}
+	if body.Value.SpaceID != nil {
+		entry.SpaceID = strings.TrimSpace(*body.Value.SpaceID)
+	}
+	if body.Value.UserID != nil {
+		entry.UserID = strings.TrimSpace(*body.Value.UserID)
+	}
+	if body.Value.Prefix != nil {
+		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
+	}
+	if body.Value.BaseURL != nil {
+		entry.BaseURL = strings.TrimSpace(*body.Value.BaseURL)
+	}
+	if body.Value.ProxyURL != nil {
+		entry.ProxyURL = strings.TrimSpace(*body.Value.ProxyURL)
+	}
+	if body.Value.Headers != nil {
+		entry.Headers = config.NormalizeHeaders(*body.Value.Headers)
+	}
+	if body.Value.Models != nil {
+		entry.Models = append([]config.NotionModel(nil), (*body.Value.Models)...)
+	}
+	if body.Value.ExcludedModels != nil {
+		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
+	}
+	normalizeNotionKey(&entry)
+	h.cfg.NotionKey[targetIndex] = entry
+	h.cfg.SanitizeNotionKeys()
+	h.persist(c)
+}
+
+func (h *Handler) DeleteNotionKey(c *gin.Context) {
+	if val := strings.TrimSpace(c.Query("token-v2")); val != "" {
+		out := make([]config.NotionKey, 0, len(h.cfg.NotionKey))
+		for _, v := range h.cfg.NotionKey {
+			if v.TokenV2 != val {
+				out = append(out, v)
+			}
+		}
+		if len(out) != len(h.cfg.NotionKey) {
+			h.cfg.NotionKey = out
+			h.cfg.SanitizeNotionKeys()
+			h.persist(c)
+		} else {
+			c.JSON(404, gin.H{"error": "item not found"})
+		}
+		return
+	}
+	if idxStr := c.Query("index"); idxStr != "" {
+		var idx int
+		if _, err := fmt.Sscanf(idxStr, "%d", &idx); err == nil && idx >= 0 && idx < len(h.cfg.NotionKey) {
+			h.cfg.NotionKey = append(h.cfg.NotionKey[:idx], h.cfg.NotionKey[idx+1:]...)
+			h.cfg.SanitizeNotionKeys()
+			h.persist(c)
+			return
+		}
+	}
+	c.JSON(400, gin.H{"error": "missing token-v2 or index"})
+}
+
 // vertex-api-key: []VertexCompatKey
 func (h *Handler) GetVertexCompatKeys(c *gin.Context) {
 	c.JSON(200, gin.H{"vertex-api-key": h.cfg.VertexCompatAPIKey})
@@ -1013,6 +1153,37 @@ func normalizeCodexKey(entry *config.CodexKey) {
 		model.Name = strings.TrimSpace(model.Name)
 		model.Alias = strings.TrimSpace(model.Alias)
 		if model.Name == "" && model.Alias == "" {
+			continue
+		}
+		normalized = append(normalized, model)
+	}
+	entry.Models = normalized
+}
+
+func normalizeNotionKey(entry *config.NotionKey) {
+	if entry == nil {
+		return
+	}
+	entry.TokenV2 = strings.TrimSpace(entry.TokenV2)
+	entry.SpaceID = strings.TrimSpace(entry.SpaceID)
+	entry.UserID = strings.TrimSpace(entry.UserID)
+	entry.Prefix = strings.TrimSpace(entry.Prefix)
+	entry.BaseURL = strings.TrimSpace(entry.BaseURL)
+	entry.ProxyURL = strings.TrimSpace(entry.ProxyURL)
+	entry.Headers = config.NormalizeHeaders(entry.Headers)
+	entry.ExcludedModels = config.NormalizeExcludedModels(entry.ExcludedModels)
+	if len(entry.Models) == 0 {
+		return
+	}
+	normalized := make([]config.NotionModel, 0, len(entry.Models))
+	for i := range entry.Models {
+		model := entry.Models[i]
+		model.Name = strings.TrimSpace(model.Name)
+		model.Alias = strings.TrimSpace(model.Alias)
+		if model.Alias == "" {
+			model.Alias = model.Name
+		}
+		if model.Name == "" || model.Alias == "" {
 			continue
 		}
 		normalized = append(normalized, model)
