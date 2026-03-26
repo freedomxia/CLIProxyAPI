@@ -291,23 +291,23 @@ func (e *NotionExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 
 		includeUsage := notionShouldIncludeStreamUsage(req.Payload, opts.OriginalRequest, translatedReq)
 		var param any
-		for _, line := range buildOpenAIStreamLines(req.Model, content, conversationID, accumulator.searchMetadata(), usageDetail, includeUsage) {
-			chunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, line, &param)
-			for _, chunk := range chunks {
-				if chunk == "" {
+			for _, line := range buildOpenAIStreamLines(req.Model, content, conversationID, accumulator.searchMetadata(), usageDetail, includeUsage) {
+				chunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, line, &param)
+				for _, chunk := range chunks {
+					if len(chunk) == 0 {
+						continue
+					}
+					out <- cliproxyexecutor.StreamChunk{Payload: chunk}
+				}
+			}
+			doneChunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, []byte("[DONE]"), &param)
+			for _, chunk := range doneChunks {
+				if len(chunk) == 0 {
 					continue
 				}
-				out <- cliproxyexecutor.StreamChunk{Payload: []byte(chunk)}
+				out <- cliproxyexecutor.StreamChunk{Payload: chunk}
 			}
-		}
-		doneChunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, []byte("[DONE]"), &param)
-		for _, chunk := range doneChunks {
-			if chunk == "" {
-				continue
-			}
-			out <- cliproxyexecutor.StreamChunk{Payload: []byte(chunk)}
-		}
-	}()
+		}()
 
 	return &cliproxyexecutor.StreamResult{
 		Headers: notionStreamResponseHeaders(httpResp.Header.Clone(), threadType),
