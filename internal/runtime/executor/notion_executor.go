@@ -14,6 +14,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/config"
+	"github.com/router-for-me/CLIProxyAPI/v6/internal/runtime/executor/helps"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/thinking"
 	"github.com/router-for-me/CLIProxyAPI/v6/internal/util"
 	cliproxyauth "github.com/router-for-me/CLIProxyAPI/v6/sdk/cliproxy/auth"
@@ -90,7 +91,7 @@ func (e *NotionExecutor) HttpRequest(ctx context.Context, auth *cliproxyauth.Aut
 	if err := e.PrepareRequest(httpReq, auth); err != nil {
 		return nil, err
 	}
-	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	return httpClient.Do(httpReq)
 }
 
@@ -104,8 +105,8 @@ func (e *NotionExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		baseModel = base
 	}
 
-	reporter := newUsageReporter(ctx, e.Identifier(), baseModel, auth)
-	defer reporter.trackFailure(ctx, &err)
+	reporter := helps.NewUsageReporter(ctx, e.Identifier(), baseModel, auth)
+	defer reporter.TrackFailure(ctx, &err)
 
 	requestBody, translatedReq, conversationID, threadType, err := e.buildRequestBody(auth, req, opts, false)
 	if err != nil {
@@ -129,7 +130,7 @@ func (e *NotionExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		authLabel = auth.Label
 		authType, authValue = auth.AccountInfo()
 	}
-	recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
+	helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
 		URL:       url,
 		Method:    http.MethodPost,
 		Headers:   httpReq.Header.Clone(),
@@ -141,10 +142,10 @@ func (e *NotionExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		AuthValue: authValue,
 	})
 
-	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
-		recordAPIResponseError(ctx, e.cfg, err)
+		helps.RecordAPIResponseError(ctx, e.cfg, err)
 		return resp, err
 	}
 	defer func() {
@@ -152,20 +153,20 @@ func (e *NotionExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 			log.Errorf("notion executor: close response body error: %v", errClose)
 		}
 	}()
-	recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
-		appendAPIResponseChunk(ctx, e.cfg, b)
+		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		err = statusErr{code: httpResp.StatusCode, msg: string(b)}
 		return resp, err
 	}
 
 	accumulator, rawBody, err := readNotionNDJSON(ctx, e.cfg, httpResp.Body)
 	if err != nil {
-		recordAPIResponseError(ctx, e.cfg, err)
+		helps.RecordAPIResponseError(ctx, e.cfg, err)
 		return resp, err
 	}
-	appendAPIResponseChunk(ctx, e.cfg, rawBody)
+	helps.AppendAPIResponseChunk(ctx, e.cfg, rawBody)
 
 	content := accumulator.finalContent()
 	if content == "" {
@@ -182,9 +183,9 @@ func (e *NotionExecutor) Execute(ctx context.Context, auth *cliproxyauth.Auth, r
 		return resp, err
 	}
 	if usageErr == nil {
-		reporter.publish(ctx, usageDetail)
+		reporter.Publish(ctx, usageDetail)
 	} else {
-		reporter.ensurePublished(ctx)
+		reporter.EnsurePublished(ctx)
 	}
 	var param any
 	out := sdktranslator.TranslateNonStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, openAIResp, &param)
@@ -205,8 +206,8 @@ func (e *NotionExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		baseModel = base
 	}
 
-	reporter := newUsageReporter(ctx, e.Identifier(), baseModel, auth)
-	defer reporter.trackFailure(ctx, &err)
+	reporter := helps.NewUsageReporter(ctx, e.Identifier(), baseModel, auth)
+	defer reporter.TrackFailure(ctx, &err)
 
 	requestBody, translatedReq, conversationID, threadType, err := e.buildRequestBody(auth, req, opts, true)
 	if err != nil {
@@ -230,7 +231,7 @@ func (e *NotionExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		authLabel = auth.Label
 		authType, authValue = auth.AccountInfo()
 	}
-	recordAPIRequest(ctx, e.cfg, upstreamRequestLog{
+	helps.RecordAPIRequest(ctx, e.cfg, helps.UpstreamRequestLog{
 		URL:       url,
 		Method:    http.MethodPost,
 		Headers:   httpReq.Header.Clone(),
@@ -242,16 +243,16 @@ func (e *NotionExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		AuthValue: authValue,
 	})
 
-	httpClient := newProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
+	httpClient := helps.NewProxyAwareHTTPClient(ctx, e.cfg, auth, 0)
 	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
-		recordAPIResponseError(ctx, e.cfg, err)
+		helps.RecordAPIResponseError(ctx, e.cfg, err)
 		return nil, err
 	}
-	recordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
+	helps.RecordAPIResponseMetadata(ctx, e.cfg, httpResp.StatusCode, httpResp.Header.Clone())
 	if httpResp.StatusCode < 200 || httpResp.StatusCode >= 300 {
 		b, _ := io.ReadAll(httpResp.Body)
-		appendAPIResponseChunk(ctx, e.cfg, b)
+		helps.AppendAPIResponseChunk(ctx, e.cfg, b)
 		if errClose := httpResp.Body.Close(); errClose != nil {
 			log.Errorf("notion executor: close response body error: %v", errClose)
 		}
@@ -269,11 +270,11 @@ func (e *NotionExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 
 		accumulator, rawBody, readErr := readNotionNDJSON(ctx, e.cfg, httpResp.Body)
 		if readErr != nil {
-			recordAPIResponseError(ctx, e.cfg, readErr)
+			helps.RecordAPIResponseError(ctx, e.cfg, readErr)
 			out <- cliproxyexecutor.StreamChunk{Err: readErr}
 			return
 		}
-		appendAPIResponseChunk(ctx, e.cfg, rawBody)
+		helps.AppendAPIResponseChunk(ctx, e.cfg, rawBody)
 
 		content := accumulator.finalContent()
 		if content == "" {
@@ -284,30 +285,30 @@ func (e *NotionExecutor) ExecuteStream(ctx context.Context, auth *cliproxyauth.A
 		usageDetail, usageErr := notionUsageDetail(baseModel, translatedReq, content)
 		if usageErr != nil {
 			log.Warnf("notion executor: usage counting failed: %v", usageErr)
-			reporter.ensurePublished(ctx)
+			reporter.EnsurePublished(ctx)
 		} else {
-			reporter.publish(ctx, usageDetail)
+			reporter.Publish(ctx, usageDetail)
 		}
 
 		includeUsage := notionShouldIncludeStreamUsage(req.Payload, opts.OriginalRequest, translatedReq)
 		var param any
-			for _, line := range buildOpenAIStreamLines(req.Model, content, conversationID, accumulator.searchMetadata(), usageDetail, includeUsage) {
-				chunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, line, &param)
-				for _, chunk := range chunks {
-					if len(chunk) == 0 {
-						continue
-					}
-					out <- cliproxyexecutor.StreamChunk{Payload: chunk}
-				}
-			}
-			doneChunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, []byte("[DONE]"), &param)
-			for _, chunk := range doneChunks {
+		for _, line := range buildOpenAIStreamLines(req.Model, content, conversationID, accumulator.searchMetadata(), usageDetail, includeUsage) {
+			chunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, line, &param)
+			for _, chunk := range chunks {
 				if len(chunk) == 0 {
 					continue
 				}
 				out <- cliproxyexecutor.StreamChunk{Payload: chunk}
 			}
-		}()
+		}
+		doneChunks := sdktranslator.TranslateStream(ctx, sdktranslator.FromString("openai"), opts.SourceFormat, req.Model, opts.OriginalRequest, translatedReq, []byte("[DONE]"), &param)
+		for _, chunk := range doneChunks {
+			if len(chunk) == 0 {
+				continue
+			}
+			out <- cliproxyexecutor.StreamChunk{Payload: chunk}
+		}
+	}()
 
 	return &cliproxyexecutor.StreamResult{
 		Headers: notionStreamResponseHeaders(httpResp.Header.Clone(), threadType),
@@ -324,16 +325,16 @@ func (e *NotionExecutor) CountTokens(ctx context.Context, auth *cliproxyauth.Aut
 	to := sdktranslator.FromString("openai")
 	translated := sdktranslator.TranslateRequest(from, to, baseModel, req.Payload, false)
 
-	enc, err := tokenizerForModel(baseModel)
+	enc, err := helps.TokenizerForModel(baseModel)
 	if err != nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("notion executor: tokenizer init failed: %w", err)
 	}
-	count, err := countOpenAIChatTokens(enc, translated)
+	count, err := helps.CountOpenAIChatTokens(enc, translated)
 	if err != nil {
 		return cliproxyexecutor.Response{}, fmt.Errorf("notion executor: token counting failed: %w", err)
 	}
 
-	usageJSON := buildOpenAIUsageJSON(count)
+	usageJSON := helps.BuildOpenAIUsageJSON(count)
 	translatedUsage := sdktranslator.TranslateTokenCount(ctx, to, from, count, usageJSON)
 	return cliproxyexecutor.Response{Payload: []byte(translatedUsage)}, nil
 }
@@ -1041,17 +1042,17 @@ func appendUniqueSource(items []notionSource, value notionSource) []notionSource
 }
 
 func notionUsageDetail(model string, translatedReq []byte, content string) (usage.Detail, error) {
-	enc, err := tokenizerForModel(model)
+	enc, err := helps.TokenizerForModel(model)
 	if err != nil {
 		return usage.Detail{}, fmt.Errorf("tokenizer init failed: %w", err)
 	}
 
-	promptTokens, err := countOpenAIChatTokens(enc, translatedReq)
+	promptTokens, err := helps.CountOpenAIChatTokens(enc, translatedReq)
 	if err != nil {
 		return usage.Detail{}, fmt.Errorf("prompt token counting failed: %w", err)
 	}
 
-	completionTokens, err := countPlainTextTokens(enc, content)
+	completionTokens, err := helps.CountPlainTextTokens(enc, content)
 	if err != nil {
 		return usage.Detail{}, fmt.Errorf("completion token counting failed: %w", err)
 	}
