@@ -1,6 +1,7 @@
 package chat_completions
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"testing"
@@ -46,7 +47,7 @@ func TestConvertOpenAIResponseToOpenAIStreamPreservesCustomEvent(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1", len(got))
 	}
-	if got[0] != `{"type":"search_metadata","searches":{"queries":["notion ai"]}}` {
+	if string(got[0]) != `{"type":"search_metadata","searches":{"queries":["notion ai"]}}` {
 		t.Fatalf("stream chunk = %q", got[0])
 	}
 }
@@ -56,7 +57,7 @@ func TestConvertOpenAIResponseToOpenAINonStreamPreservesCustomFields(t *testing.
 	raw := []byte(`{"id":"chatcmpl-1","search_metadata":{"type":"search_metadata","searches":{"queries":["notion ai"]}}}`)
 
 	got := ConvertOpenAIResponseToOpenAINonStream(context.Background(), "", nil, nil, raw, &param)
-	if got != string(raw) {
+	if !bytes.Equal(got, raw) {
 		t.Fatalf("non-stream payload = %q, want %q", got, string(raw))
 	}
 }
